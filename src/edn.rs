@@ -29,6 +29,27 @@ pub(crate) fn as_str(value: &Value) -> Option<&str> {
     }
 }
 
+/// A `Value::Symbol` rendered as `ns/name` (or `name` when unqualified).
+pub(crate) fn sym_string(value: &Value) -> Option<String> {
+    let Value::Symbol(sym) = value else {
+        return None;
+    };
+    Some(match sym.namespace() {
+        Some(ns) => format!("{}/{}", ns, sym.name()),
+        None => sym.name().to_string(),
+    })
+}
+
+/// The symbols of a `Value::Vector` at `key`, each rendered `ns/name`. `None`
+/// when the key is absent or its value is not a vector; non-symbol elements are
+/// skipped.
+pub(crate) fn sym_vec_at(map: &BTreeMap<Value, Value>, key: Value) -> Option<Vec<String>> {
+    match get(map, key)? {
+        Value::Vector(v) => Some(v.iter().filter_map(sym_string).collect()),
+        _ => None,
+    }
+}
+
 /// The strings of a `Value::Vector` at `key`. `None` when the key is absent
 /// or its value is not a vector; non-string elements are skipped.
 pub(crate) fn str_vec_at(map: &BTreeMap<Value, Value>, key: Value) -> Option<Vec<String>> {

@@ -35,7 +35,9 @@ use super::{NsMeta, Symbol};
 ///     like a list one.
 /// 27: a file naming its namespace with `(in-ns 'x)` defines its vars in `x`
 ///     (`NsMeta.in_ns`).
-pub const CACHE_FORMAT_VERSION: u32 = 27;
+/// 28: `DefKind::KeywordDef` (was `IntegrantKey`), and re-frame `reg-*`
+///     registrations define their keyword.
+pub const CACHE_FORMAT_VERSION: u32 = 28;
 
 #[derive(Serialize, Deserialize)]
 pub struct JarCacheEntry {

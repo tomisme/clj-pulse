@@ -376,6 +376,16 @@ there.
   the `**/*.edn` watcher keeps every indexed one fresh. A config the scan
   cannot see makes references skip it and a keyword rename silently leave it
   pointing at the old key.
+- Keyword-defining forms resolve by fqn through the same head resolver
+  (`head_fqn_candidates`): the built-in re-frame set (`re-frame.core/` +
+  `reg-event-db`, `reg-event-ctx`, `reg-event-fx`, `reg-sub`, `reg-sub-raw`,
+  `reg-fx`, `reg-cofx`, `reg-interceptor`, `reg-global-interceptor`), the
+  project's `:keyword-defining-forms`, and Integrant's
+  `(defmethod ig/init-key ::x …)`. The keyword in the first argument becomes a
+  `KeywordDef` symbol whose `name_range` spans the whole token, and the
+  occurrence walker skips that argument: the declaration is a symbol, never also
+  an occurrence, so references list it once. An unqualified keyword defines
+  nothing (`keyword_fqn` rejects it, as for Integrant).
 - Only top-level `:paths` in deps.edn counts (not `:paths` inside `:aliases`).
 - deps.edn is read with `edn::parse_lenient`: `^` metadata (`^:antq/exclude`)
   and `#_` discards, stacked ones included, are blanked before parsing.

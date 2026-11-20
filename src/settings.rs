@@ -2,8 +2,9 @@
 //!
 //! Loads `.clj-pulse/config.edn` (clj-pulse's own settings, primary) and merges
 //! it over the compatible subset of `.clj-kondo/config.edn` (read via `kondo`),
-//! producing the resolved [`ExtractConfig`] the extractor consumes. For now the
-//! only setting is `:lint-as`.
+//! producing the resolved [`ExtractConfig`] the extractor consumes. The settings
+//! are `:lint-as` (merged with clj-kondo's) and `:keyword-defining-forms`
+//! (clj-pulse's own).
 //!
 //! Merge rule: clj-pulse wins per key. The raw `(macro, target)` pairs are
 //! merged first (so a clj-pulse entry fully overrides a clj-kondo one, even when
@@ -45,7 +46,11 @@ const BINDING_FORMS: &[&str] = &[
 /// Merges clj-kondo `:lint-as` pairs (base) with clj-pulse pairs (overlay,
 /// wins per key) into an [`ExtractConfig`]. Targets that neither define nor
 /// bind are dropped.
-fn merge(kondo_pairs: Vec<(String, String)>, pulse_pairs: Vec<(String, String)>) -> ExtractConfig {
+fn merge(
+    kondo_pairs: Vec<(String, String)>,
+    pulse_pairs: Vec<(String, String)>,
+    keyword_forms: Vec<String>,
+) -> ExtractConfig {
     // Merge raw pairs first so clj-pulse overrides clj-kondo per macro, then map
     // targets. Mapping after the overlay lets a clj-pulse remap to a target
     // that does nothing (e.g. `clojure.core/->`) drop the macro entirely.
@@ -84,7 +89,22 @@ fn merge(kondo_pairs: Vec<(String, String)>, pulse_pairs: Vec<(String, String)>)
     ExtractConfig {
         lint_as,
         lint_as_forms,
+        keyword_forms: keyword_forms.into_iter().collect(),
     }
+}
+
+/// Parses `.clj-pulse/config.edn` once into the two things it contributes:
+/// its `:lint-as` pairs (overriding clj-kondo's) and `:keyword-defining-forms`,
+/// the forms whose first argument is the keyword they define
+/// (`[re-frame.query/reg-query …]`), each rendered `ns/name`. Missing keys and
+/// unparseable input contribute nothing.
+fn parse_pulse_config(edn: &str) -> (Vec<(String, String)>, Vec<String>) {
+    let Ok(edn_format::Value::Map(top)) = edn_format::parse_str(edn) else {
+        return (vec![], vec![]);
+    };
+    let keyword_forms =
+        crate::edn::sym_vec_at(&top, crate::edn::kw("keyword-defining-forms")).unwrap_or_default();
+    (kondo::lint_as_at(&top), keyword_forms)
 }
 
 /// Loads the resolved [`ExtractConfig`] for the project rooted at `root`.
@@ -93,11 +113,12 @@ fn merge(kondo_pairs: Vec<(String, String)>, pulse_pairs: Vec<(String, String)>)
 /// unparseable files contribute nothing.
 pub fn load(root: &Path) -> ExtractConfig {
     let kondo_pairs = kondo::lint_as(root);
-    let pulse_pairs = std::fs::read_to_string(root.join(".clj-pulse").join("config.edn"))
-        .ok()
-        .map(|src| kondo::parse_lint_as(&src))
-        .unwrap_or_default();
-    merge(kondo_pairs, pulse_pairs)
+    let (pulse_pairs, keyword_forms) =
+        std::fs::read_to_string(root.join(".clj-pulse").join("config.edn"))
+            .ok()
+            .map(|src| parse_pulse_config(&src))
+            .unwrap_or_default();
+    merge(kondo_pairs, pulse_pairs, keyword_forms)
 }
 
 /// Loads the `:kondo` overrides from the project's `.clj-pulse/config.edn`.
@@ -123,6 +144,7 @@ mod tests {
         let cfg = merge(
             vec![pair("dc/dc", "clojure.core/def")],
             vec![pair("dc/dc", "clojure.core/defn")],
+            vec![],
         );
         assert_eq!(cfg.lint_as.get("dc/dc"), Some(&DefKind::Defn));
         assert_eq!(cfg.lint_as.len(), 1);
@@ -140,6 +162,7 @@ mod tests {
                 pair("conch/programs", "clojure.core/declare"),
                 pair("m/define-migration", "clj-kondo.lint-as/def-catch-all"),
             ],
+            vec![],
             vec![],
         );
         assert_eq!(cfg.lint_as.get("dc/dc"), Some(&DefKind::Def));
@@ -166,6 +189,7 @@ mod tests {
         let cfg = merge(
             vec![pair("x/x", "clojure.core/def")],
             vec![pair("x/x", "clojure.core/for")],
+            vec![],
         );
         assert!(cfg.lint_as.is_empty());
         assert_eq!(
@@ -175,18 +199,35 @@ mod tests {
         let cfg = merge(
             vec![pair("x/x", "clojure.core/def")],
             vec![pair("x/x", "clojure.core/->")],
+            vec![],
         );
         assert!(cfg.lint_as.is_empty() && cfg.lint_as_forms.is_empty());
     }
 
     #[test]
     fn bare_target_name_maps() {
-        let cfg = merge(vec![pair("d", "def")], vec![]);
+        let cfg = merge(vec![pair("d", "def")], vec![], vec![]);
         assert_eq!(cfg.lint_as.get("d"), Some(&DefKind::Def));
     }
 
     #[test]
     fn empty_inputs_yield_empty() {
-        assert!(merge(vec![], vec![]).lint_as.is_empty());
+        assert!(merge(vec![], vec![], vec![]).lint_as.is_empty());
+    }
+
+    #[test]
+    fn keyword_defining_forms_are_fqns() {
+        let (pairs, forms) =
+            parse_pulse_config("{:keyword-defining-forms [re-frame.query/reg-query bare-name 42]}");
+        assert_eq!(forms, vec!["re-frame.query/reg-query", "bare-name"]);
+        assert!(pairs.is_empty());
+        assert!(parse_pulse_config("{:lint-as {}}").1.is_empty());
+        assert!(parse_pulse_config("not edn (((").1.is_empty());
+    }
+
+    #[test]
+    fn keyword_forms_reach_the_extract_config() {
+        let cfg = merge(vec![], vec![], vec!["w/reg-thing".to_string()]);
+        assert!(cfg.keyword_forms.contains("w/reg-thing"));
     }
 }

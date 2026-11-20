@@ -17,21 +17,23 @@
 use std::path::Path;
 use std::time::Duration;
 
+use std::collections::BTreeMap;
+
 use edn_format::Value;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Range};
 
-use crate::edn::{get, kw};
+use crate::edn::{get, kw, sym_string};
 
-/// A `Value::Symbol` rendered as `ns/name` (or `name` when unqualified), else
-/// `None` for any non-symbol value.
-fn sym_to_string(value: &Value) -> Option<String> {
-    let Value::Symbol(sym) = value else {
-        return None;
+/// The `:lint-as` map of an already-parsed config, as `(macro-fqn,
+/// target-fqn)` pairs. Empty when the key is absent or not a map; non-symbol
+/// keys/values are skipped.
+pub(crate) fn lint_as_at(top: &BTreeMap<Value, Value>) -> Vec<(String, String)> {
+    let Some(Value::Map(map)) = get(top, kw("lint-as")) else {
+        return vec![];
     };
-    Some(match sym.namespace() {
-        Some(ns) => format!("{}/{}", ns, sym.name()),
-        None => sym.name().to_string(),
-    })
+    map.iter()
+        .filter_map(|(k, v)| Some((sym_string(k)?, sym_string(v)?)))
+        .collect()
 }
 
 /// Parses the top-level `:lint-as` map of a clj-kondo config, returning each
@@ -39,15 +41,10 @@ fn sym_to_string(value: &Value) -> Option<String> {
 /// empty vec when the input is not a map, has no `:lint-as` map, or that map is
 /// empty; non-symbol keys/values are skipped.
 pub(crate) fn parse_lint_as(edn: &str) -> Vec<(String, String)> {
-    let Ok(Value::Map(top)) = edn_format::parse_str(edn) else {
-        return vec![];
-    };
-    let Some(Value::Map(map)) = get(&top, kw("lint-as")) else {
-        return vec![];
-    };
-    map.iter()
-        .filter_map(|(k, v)| Some((sym_to_string(k)?, sym_to_string(v)?)))
-        .collect()
+    match edn_format::parse_str(edn) {
+        Ok(Value::Map(top)) => lint_as_at(&top),
+        _ => vec![],
+    }
 }
 
 /// Reads `root/.clj-kondo/config.edn` and returns its `:lint-as` pairs. Missing

@@ -5,7 +5,7 @@ pub mod jar_cache;
 pub mod jdk;
 pub mod scanner;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
@@ -49,10 +49,11 @@ pub enum DefKind {
     /// reaches the declaration when the real definition is elsewhere (or made
     /// by a macro we don't model).
     Declare,
-    /// An Integrant component key, defined by `(defmethod ig/init-key ::x …)`.
+    /// A keyword some form registers as a definition: Integrant's
+    /// `(defmethod ig/init-key ::x …)` or re-frame's `(rf/reg-event-fx :ns/x …)`.
     /// Its `fqn` is the canonical colon-prefixed keyword (`:my.ns/x`), keyed
     /// disjointly from var fqns (which never start with `:`).
-    IntegrantKey,
+    KeywordDef,
 }
 
 impl DefKind {
@@ -107,6 +108,11 @@ pub struct ExtractConfig {
     /// `:lint-as`'d to (`for`), named as the walkers name core heads. The
     /// macro then binds its locals the way the target does.
     pub lint_as_forms: HashMap<String, String>,
+    /// Form fqn (`re-frame.query/reg-query`) → it defines the keyword in its
+    /// first argument, from `:keyword-defining-forms`. Additive to the built-in
+    /// re-frame `reg-*` set the extractor knows, so an empty config keeps the
+    /// stock behavior plus re-frame.
+    pub keyword_forms: HashSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

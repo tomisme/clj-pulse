@@ -45,7 +45,8 @@ then the editor features users notice as missing. Guiding decisions:
 ## Where we stand (October 2026, v0.5.7)
 
 Shipped: definition (project, JAR, git and `:local/root` deps, JDK sources,
-locals, keywords, Integrant keys, protocol and multimethod declarations),
+locals, keywords, Integrant keys, re-frame `reg-*` registrations, protocol and
+multimethod declarations),
 references, rename (vars, locals, require aliases and qualified keywords) with
 `prepareRename`,
 hover, ClojureDocs
@@ -555,8 +556,6 @@ One line each, newest last. Promote or reject; never let this grow silently.
   `lein classpath` for a root Leiningen project, so transitive deps are
   indexed; what stays thin is the fallback when that command is off or fails
   (version-less direct deps are skipped). See [MEMORY.md](MEMORY.md).
-- **re-frame keyword registrations** (`reg-sub`/`reg-event-*` as definitions);
-  the Integrant machinery is the template.
 - **CLI mode** (`clj-pulse clean-ns|lint`) for CI, once the features exist.
 - **Persistent project analysis cache** — only if a monorepo shows the need.
 - **Custom macros beyond `:lint-as`** (multi-name macros) — consider clj-kondo

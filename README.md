@@ -10,9 +10,13 @@ A fast, low-memory Clojure language server.
   faster still. Definition answers in
   under a millisecond, and diagnostics follow an edit within a fraction of a
   second. See [Performance](#performance) for details.
-- **Integrant navigation.** Jump from a component key in `config.edn` or an
-  `#ig/ref` to its `ig/init-key` implementation. Find references and rename
-  qualified keywords across indexed source and config files.
+- **Integrant and re-frame navigation.** Jump from a component key in
+  `config.edn` or an `#ig/ref` to its `ig/init-key` implementation, and from a
+  dispatch or subscribe site to the `reg-event-fx`/`reg-sub` that registers the
+  keyword — through `:as` aliases, `:refer`s, or a bare `:ns/keyword`. Find
+  references and rename qualified keywords across indexed source and config
+  files. A project's own registration macros join through
+  `:keyword-defining-forms` ([settings](docs/SETTINGS.md)).
 - **Monorepo support.** Automatically discover projects using `deps.edn`,
   Leiningen, or lgx within one workspace. Navigate across their sources and
   cached dependencies, with [classpath settings per project](docs/SETTINGS.md#projects-and-classpaths).

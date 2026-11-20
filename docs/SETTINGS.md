@@ -21,6 +21,7 @@ name the same setting.
 {:projects [{:path "." :classpath {:enabled true :cmd "clojure -A:dev:test -Spath"}}
             {:path "apps/api" :classpath {:enabled true}}]
  :lint-as {my.lib/defentity clojure.core/def}
+ :keyword-defining-forms [my.app.reg/reg-page]
  :kondo {:enabled true :path "clj-kondo" :live-max-kb 256}}
 ```
 
@@ -31,6 +32,7 @@ name the same setting.
 | `:projects […] :classpath :enabled` | `true` for the workspace root, `false` for sub-projects | yes | `clojurePulse.projects[].classpathEnabled` |
 | `:projects […] :classpath :cmd` | `clojure -A:dev:test -Spath` (deps.edn), `lein classpath` (Leiningen), none (lgx) | yes | `clojurePulse.projects[].classpathCommand` |
 | `:lint-as` | `{}`, over whatever `.clj-kondo/config.edn` declares | yes | — (file only) |
+| `:keyword-defining-forms` | `[]` — only re-frame's `reg-*` macros define keywords | yes | — (file only) |
 | `:kondo :enabled` | `true` — use clj-kondo when the binary is found | yes | `clojurePulse.kondo.enabled` |
 | `:kondo :path` | `clj-kondo`, resolved through PATH plus the well-known install dirs | yes | `clojurePulse.kondo.path` |
 | `:kondo :live-max-kb` | `256` — buffers above this skip clj-kondo on keystrokes, never on open or save; `0` means no limit | yes | `clojurePulse.kondo.liveMaxKb` (pending in the extension) |
@@ -50,9 +52,17 @@ Notes:
   `when-let`, `if-let`, `when-some`, `if-some`, `with-open`, `dotimes`, `fn`,
   `letfn`, `as->`, `reify`, `extend-type` and `extend-protocol` (which bind
   locals); any other target drops the macro.
+- `:keyword-defining-forms` lists macros that register the keyword in their
+  first argument, as fully-qualified symbols (`[my.app.reg/reg-page]`), for a
+  project's own re-frame wrappers. re-frame's `reg-event-db`, `reg-event-ctx`,
+  `reg-event-fx`, `reg-sub`, `reg-sub-raw`, `reg-fx`, `reg-cofx`,
+  `reg-interceptor` and `reg-global-interceptor` need no entry: the extractor
+  knows them. A listed form is matched through the call site's `:as`/`:refer`
+  (`rfq/reg-page` matches `my.app.reg/reg-page`), and its first argument must be
+  a qualified keyword — an unqualified one is too ambiguous to define.
 - Live reload watches `**/.clj-pulse/config.edn` and `**/.clj-kondo/config.edn`:
-  a save re-resolves classpaths, reloads `:lint-as` and re-indexes, and
-  re-probes clj-kondo. No restart.
+  a save re-resolves classpaths, reloads `:lint-as` and
+  `:keyword-defining-forms` and re-indexes, and re-probes clj-kondo. No restart.
 
 ## `initializationOptions`
 

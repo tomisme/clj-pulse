@@ -1154,7 +1154,7 @@ fn test_integrant_init_key_is_definition() {
 
     let defs: Vec<_> = syms
         .iter()
-        .filter(|s| s.kind == DefKind::IntegrantKey)
+        .filter(|s| s.kind == DefKind::KeywordDef)
         .collect();
     assert_eq!(defs.len(), 1, "syms: {:?}", syms);
     assert_eq!(defs[0].fqn, ":readx.db/db");
@@ -1176,7 +1176,7 @@ fn test_non_integrant_defmethod_keyword_is_only_an_occurrence() {
     let (_, syms, occs) = extract_full(src, Path::new("a.clj")).unwrap();
 
     assert!(
-        syms.iter().all(|s| s.kind != DefKind::IntegrantKey),
+        syms.iter().all(|s| s.kind != DefKind::KeywordDef),
         "syms: {:?}",
         syms
     );
@@ -1186,6 +1186,148 @@ fn test_non_integrant_defmethod_keyword_is_only_an_occurrence() {
         "occs: {:?}",
         occs
     );
+}
+
+#[test]
+fn test_reframe_registration_keyword_is_definition() {
+    // re-frame's reg-* macros define the keyword they register, whatever
+    // notation the head uses; the head itself stays a usage.
+    let src = "(ns app.events\n  (:require [re-frame.core :as rf :refer [reg-cofx]]))\n\
+               (rf/reg-event-fx :dcw.event/navigate (fn [_ [_ id]] id))\n\
+               (rf/reg-sub ::navigated (fn [db _] db))\n\
+               (re-frame.core/reg-event-db :dcw.event/save (fn [db _] db))\n\
+               (reg-cofx :dcw.cofx/now (fn [] 0))";
+    let (_, syms, occs) = extract_full(src, Path::new("events.cljs")).unwrap();
+
+    let mut defs: Vec<_> = syms
+        .iter()
+        .filter(|s| s.kind == DefKind::KeywordDef)
+        .map(|s| s.fqn.as_str())
+        .collect();
+    defs.sort_unstable();
+    assert_eq!(
+        defs,
+        vec![
+            ":app.events/navigated",
+            ":dcw.cofx/now",
+            ":dcw.event/navigate",
+            ":dcw.event/save"
+        ],
+        "syms: {:?}",
+        syms
+    );
+
+    // The registration keyword is the definition, not also an occurrence.
+    for fqn in &defs {
+        assert!(
+            occurrences_of(&occs, fqn).is_empty(),
+            "{} leaked as an occurrence: {:?}",
+            fqn,
+            occs
+        );
+    }
+    // The head is still a usage, so references reach the macro.
+    assert_eq!(occurrences_of(&occs, "re-frame.core/reg-event-fx").len(), 1);
+}
+
+#[test]
+fn test_non_reframe_reg_head_stays_an_occurrence() {
+    // A qualified reg-* head outside re-frame.core defines nothing: another
+    // library's `reg-foo` is a call like any other.
+    let src = "(ns app.x\n  (:require [other.lib :as lib]))\n\
+               (lib/reg-event-fx :app/thing 1)";
+    let (_, syms, occs) = extract_full(src, Path::new("x.clj")).unwrap();
+
+    assert!(
+        syms.iter().all(|s| s.kind != DefKind::KeywordDef),
+        "syms: {:?}",
+        syms
+    );
+    assert_eq!(occurrences_of(&occs, ":app/thing").len(), 1);
+}
+
+#[test]
+fn test_unqualified_registration_keyword_is_no_definition() {
+    // `:thing` is too ambiguous to be a definition; it stays a plain usage.
+    let src = "(ns app.x\n  (:require [re-frame.core :as rf]))\n\
+               (rf/reg-event-fx :thing (fn [_ _] nil))";
+    let (_, syms, occs) = extract_full(src, Path::new("x.clj")).unwrap();
+
+    assert!(
+        syms.iter().all(|s| s.kind != DefKind::KeywordDef),
+        "syms: {:?}",
+        syms
+    );
+    assert_eq!(occurrences_of(&occs, ":thing").len(), 1);
+}
+
+#[test]
+fn test_nested_registration_is_a_usage_not_a_definition() {
+    // Only a top-level form defines: a stub registration inside a fn body — how
+    // a test fixture stubs an event — has no symbol, so its keyword must stay an
+    // ordinary usage instead of disappearing from references and rename.
+    let src = "(ns app.t\n  (:require [re-frame.core :as rf]))\n\
+               (defn stub! []\n  (rf/reg-event-fx :dcw.event/x (fn [_ _] nil)))\n\
+               (rf/reg-event-fx :dcw.event/y (fn [_ _] nil))";
+    let (_, syms, occs) = extract_full(src, Path::new("t.cljs")).unwrap();
+
+    let defs: Vec<_> = syms
+        .iter()
+        .filter(|s| s.kind == DefKind::KeywordDef)
+        .map(|s| s.fqn.as_str())
+        .collect();
+    assert_eq!(defs, vec![":dcw.event/y"], "syms: {:?}", syms);
+    assert_eq!(
+        occurrences_of(&occs, ":dcw.event/x").len(),
+        1,
+        "the nested stub's keyword vanished: {:?}",
+        occs
+    );
+    assert!(occurrences_of(&occs, ":dcw.event/y").is_empty());
+}
+
+#[test]
+fn test_registration_inside_a_reader_conditional_is_a_definition() {
+    // A top-level `#?(:clj …)` is processed through its Clojure branch, so a
+    // registration inside it defines its keyword like any other top-level form —
+    // and, being a definition, its token is not also an occurrence.
+    let src = "(ns app.x\n  (:require [re-frame.core :as rf]))\n\
+               #?(:clj (rf/reg-sub :x/f (fn [_ _] 1)))";
+    let (_, syms, occs) = extract_full(src, Path::new("x.cljs")).unwrap();
+
+    let defs: Vec<_> = syms
+        .iter()
+        .filter(|s| s.kind == DefKind::KeywordDef)
+        .map(|s| s.fqn.as_str())
+        .collect();
+    assert_eq!(defs, vec![":x/f"], "syms: {:?}", syms);
+    assert!(occurrences_of(&occs, ":x/f").is_empty(), "occs: {:?}", occs);
+}
+
+#[test]
+fn test_configured_keyword_defining_form() {
+    // `:keyword-defining-forms` adds a project wrapper; the head resolves
+    // through its alias, the keyword through `::` to the current namespace.
+    use clj_pulse::index::ExtractConfig;
+
+    let cfg = ExtractConfig {
+        keyword_forms: std::collections::HashSet::from(["re-frame.query/reg-query".to_string()]),
+        ..Default::default()
+    };
+    let src = "(ns app.q\n  (:require [re-frame.query :as rfq]))\n\
+               (rfq/reg-query ::invoices (fn [_ _] nil))\n\
+               (rfq/reg-other ::ignored 1)";
+    let (_, syms, occs) =
+        clj_pulse::index::extractor::extract_full_with(src, Path::new("q.cljs"), &cfg).unwrap();
+
+    let defs: Vec<_> = syms
+        .iter()
+        .filter(|s| s.kind == DefKind::KeywordDef)
+        .map(|s| s.fqn.as_str())
+        .collect();
+    assert_eq!(defs, vec![":app.q/invoices"], "syms: {:?}", syms);
+    assert!(occurrences_of(&occs, ":app.q/invoices").is_empty());
+    assert_eq!(occurrences_of(&occs, ":app.q/ignored").len(), 1);
 }
 
 #[test]

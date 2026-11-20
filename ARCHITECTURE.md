@@ -37,9 +37,15 @@ extractor.rs: keywords are recorded as occurrences with colon-prefixed fqns,
   `::alias/name`) under the namespace they resolve to (`:ns/name`), unqualified
   ones under `:name`. Definition ignores the unqualified fqns (there is nothing
   to navigate to); references and keyword completion use them.
-extractor.rs: `(defmethod ig/init-key ::x …)` records `:ns/x` as an IntegrantKey
-  *definition* (`DefKind::IntegrantKey`); the other lifecycle defmethods and all
-  config uses are occurrences, so goto-definition lands on the constructor.
+extractor.rs: a *keyword-defining* form records the keyword in its first
+  argument as a `DefKind::KeywordDef` *definition*: `(defmethod ig/init-key ::x …)`
+  (Integrant), re-frame's `reg-event-db`/`reg-event-fx`/`reg-event-ctx`/`reg-sub`/
+  `reg-sub-raw`/`reg-fx`/`reg-cofx`/`reg-interceptor`/`reg-global-interceptor`,
+  and any form the project lists in `:keyword-defining-forms`. Only a top-level
+  form defines; the other lifecycle defmethods, a nested stub registration, and
+  all config uses are occurrences, so goto-definition lands on the declaration.
+  The skip is by token position (`OccurrenceCtx::keyword_defs`), so it holds at
+  any depth the walk reaches.
 scanner.rs: EDN files anywhere in a project (to `EDN_SCAN_MAX_DEPTH`, gitignore
   respected) containing `#ig/ref` are scanned for keyword occurrences
   (`extract_edn`) and inserted via `Index::insert_edn_file` (occurrences only) —
@@ -52,7 +58,7 @@ scanner.rs: EDN files anywhere in a project (to `EDN_SCAN_MAX_DEPTH`, gitignore
   no namespace of their own (`:other/db` keeps its, `:_/db` escapes to plain
   `:db`), exactly as the reader does.
 handlers/references.rs: keyword rename (`rename_target` → `RenameTarget::Keyword`)
-  collects every site — occurrences, the `IntegrantKey` definition, and the
+  collects every site — occurrences, the `KeywordDef` definition, and the
   definitions of open buffers — and edits only the name each token ends with.
   A site it cannot rewrite that way (a `{::keys [db]}` entry, which is a symbol
   binding a local) refuses the whole rename rather than leave it reading the

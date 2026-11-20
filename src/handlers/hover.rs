@@ -230,7 +230,7 @@ fn defkind_str(kind: &DefKind) -> &'static str {
         DefKind::Deftype => "deftype",
         DefKind::Deftest => "deftest",
         DefKind::Declare => "declare",
-        DefKind::IntegrantKey => "defmethod",
+        DefKind::KeywordDef => "keyword",
     }
 }
 

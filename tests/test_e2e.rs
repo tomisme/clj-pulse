@@ -4610,6 +4610,61 @@ fn test_e2e_integrant_goto_definition_from_config() {
 }
 
 #[test]
+fn test_e2e_reframe_registration_keyword_navigates() {
+    // A dispatch site names the keyword alone — no alias of the events
+    // namespace is in scope, which is how a re-frame app is written. Both an
+    // aliased `reg-event-fx` and a `:refer`d `reg-event-db` define their key.
+    let project = setup_named("reframe_project");
+    let root = project.path().canonicalize().unwrap();
+
+    let mut client = LspClient::start(&root);
+    client.initialize(&root);
+    client.wait_for_log("Indexed");
+
+    let views = root.join("src/app/views.cljs");
+    let events = root.join("src/app/events.cljs");
+    client.did_open(&views);
+
+    // `:dcw.event/save` is registered through a `:refer`d `reg-event-db`, the
+    // other way a re-frame macro reaches a file.
+    for needle in [
+        ":dcw.event/navigate",
+        ":dcw.sub/navigated",
+        ":dcw.event/save",
+    ] {
+        let (line, ch) = position_of(&views, needle);
+        let result = client.goto_definition(&views, line, ch);
+        let uri = result["uri"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no definition for {}: {}", needle, result));
+        assert!(
+            uri.ends_with("/src/app/events.cljs"),
+            "{} -> {}",
+            needle,
+            uri
+        );
+        // The location is the keyword token, wherever the head sits.
+        let (reg_line, _) = position_of(&events, needle);
+        assert_eq!(
+            result["range"]["start"]["line"],
+            json!(reg_line),
+            "{} landed on the wrong line: {}",
+            needle,
+            result
+        );
+    }
+
+    // References reach the declaration and the dispatch, and the registration
+    // keyword is not also an occurrence (which would list it twice).
+    let (line, ch) = position_of(&views, ":dcw.event/navigate");
+    let result = client.references(&views, line, ch, true);
+    let locs = result
+        .as_array()
+        .unwrap_or_else(|| panic!("references returned null: {}", result));
+    assert_eq!(locs.len(), 2, "locs: {:?}", locs);
+}
+
+#[test]
 fn test_e2e_integrant_references_span_defmethods_and_config() {
     // References on the component keyword reach every lifecycle defmethod plus
     // the config-map key and the `#ig/ref`.

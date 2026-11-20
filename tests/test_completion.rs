@@ -890,7 +890,7 @@ fn test_no_auto_require_for_integrant_keys() {
     // `sys/database` would name nothing, and the require would be pointless.
     let index = auto_require_index();
     let mut key = defn_sym("database", "app.system");
-    key.kind = DefKind::IntegrantKey;
+    key.kind = DefKind::KeywordDef;
     key.fqn = ":app.system/database".to_string();
     index.insert_file(ns_meta("app.system"), vec![key], vec![]);
 

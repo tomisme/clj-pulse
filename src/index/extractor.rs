@@ -243,6 +243,7 @@ fn collect_edn_ns_map(node: Node, source: &str, ns_meta: &NsMeta, out: &mut Vec<
         declared: HashSet::new(),
         lint_as: NO_LINT_AS.get_or_init(HashMap::new),
         lint_as_forms: NO_LINT_AS_FORMS.get_or_init(HashMap::new),
+        keyword_defs: HashSet::new(),
     };
     let map_ns = ns_map_prefix(node, &ctx);
     let mut cursor = node.walk();
@@ -415,6 +416,13 @@ pub fn extract_analysis_tree(
         .filter(|s| s.kind == DefKind::Declare)
         .map(|s| (s.name_range.start.line, s.name_range.start.character))
         .collect();
+    // The token a keyword-defining form defines is its symbol's site, so it is
+    // not also an occurrence.
+    let keyword_defs: HashSet<(u32, u32)> = symbols
+        .iter()
+        .filter(|s| s.kind == DefKind::KeywordDef)
+        .map(|s| (s.name_range.start.line, s.name_range.start.character))
+        .collect();
     let ctx = OccurrenceCtx {
         source,
         ns_meta: &ns_meta,
@@ -423,6 +431,7 @@ pub fn extract_analysis_tree(
         declared,
         lint_as: &cfg.lint_as,
         lint_as_forms: &cfg.lint_as_forms,
+        keyword_defs,
     };
     let mut occurrences = Vec::new();
     let mut scope = Scope::new();
@@ -746,6 +755,13 @@ fn process_top_level_list(
         if is_defmethod {
             extract_integrant_key(node, &children, source, file, ns_meta, symbols);
         }
+    }
+
+    // A keyword-defining form (`(rf/reg-event-fx :ns/kw …)`) defines its
+    // keyword; the occurrence pass skips that argument, so this symbol is the
+    // keyword's only site.
+    if let Some(fqn) = keyword_def_keyword(&children, ns_meta, source, &cfg.keyword_forms) {
+        extract_keyword_def(node, children[1], &fqn, source, file, symbols);
     }
 }
 
@@ -1395,6 +1411,55 @@ fn has_private_attr_map(kind: DefKind, rest: &[Node], source: &str) -> bool {
 /// as occurrences, so go-to-definition lands on the constructor.
 const INTEGRANT_INIT_KEY: &str = "integrant.core/init-key";
 
+/// re-frame's registration macros, in `re-frame.core`: each takes the keyword
+/// it registers as its first argument and defines it. A project's own wrappers
+/// join through `.clj-pulse/config.edn`'s `:keyword-defining-forms`.
+const REFRAME_CORE_NS: &str = "re-frame.core";
+const REFRAME_REGISTRATION_FORMS: &[&str] = &[
+    "reg-cofx",
+    "reg-event-ctx",
+    "reg-event-db",
+    "reg-event-fx",
+    "reg-fx",
+    "reg-global-interceptor",
+    "reg-interceptor",
+    "reg-sub",
+    "reg-sub-raw",
+];
+
+/// The keyword a form *defines*, when its head is a keyword-defining form:
+/// re-frame's `reg-*` macros, or any head fqn listed in
+/// `:keyword-defining-forms`. `None` for every other form, and for a keyword
+/// argument that is missing or unqualified ([`keyword_fqn`] rejects those, as
+/// it does for the Integrant dispatch).
+fn keyword_def_keyword(
+    children: &[Node],
+    ns_meta: &NsMeta,
+    source: &str,
+    extra: &HashSet<String>,
+) -> Option<String> {
+    let keyword = children.get(1).filter(|n| n.kind() == "kwd_lit")?;
+    let head = *children.first().filter(|n| n.kind() == "sym_lit")?;
+    // Every list in the file reaches this: reject the common case on the head's
+    // name alone, before resolving aliases or allocating an fqn.
+    if extra.is_empty() && !REFRAME_REGISTRATION_FORMS.contains(&sym_text(head, source)) {
+        return None;
+    }
+    let defines = head_fqn_candidates(head, ns_meta, source)
+        .into_iter()
+        .any(|fqn| match fqn.rsplit_once('/') {
+            Some((ns, name)) => {
+                extra.contains(&fqn)
+                    || (ns == REFRAME_CORE_NS && REFRAME_REGISTRATION_FORMS.contains(&name))
+            }
+            None => extra.contains(&fqn),
+        });
+    if !defines {
+        return None;
+    }
+    keyword_fqn(*keyword, ns_meta, source)
+}
+
 /// Resolves the multimethod a `defmethod` extends to its fqn (e.g.
 /// `integrant.core/init-key`) — the single hook point for keyword-defining
 /// macros (re-frame `reg-*`, spec `s/def` would slot in here). A qualified head
@@ -1436,22 +1501,34 @@ fn extract_integrant_key(
     let Some(fqn) = keyword_fqn(*dispatch, ns_meta, source) else {
         return;
     };
+    extract_keyword_def(form_node, *dispatch, &fqn, source, file, symbols);
+}
 
+/// Records `keyword` as the definition of `fqn` (`:ns/name`) — the symbol that
+/// makes go-to-definition on that keyword land somewhere.
+fn extract_keyword_def(
+    form_node: Node,
+    keyword: Node,
+    fqn: &str,
+    source: &str,
+    file: &Path,
+    symbols: &mut Vec<Symbol>,
+) {
     // `fqn` is `:ns/name`; split off the colon to fill the ns/name fields.
     let (ns, name) = fqn[1..].rsplit_once('/').unwrap_or(("", &fqn[1..]));
     symbols.push(Symbol {
         name: name.to_string(),
-        fqn: fqn.clone(),
+        fqn: fqn.to_string(),
         ns: ns.to_string(),
-        kind: DefKind::IntegrantKey,
+        kind: DefKind::KeywordDef,
         params: Vec::new(),
         doc: None,
         file: file.to_path_buf(),
         source: super::SymbolSource::Project,
         range: node_to_lsp_range(form_node, source),
         // Whole-keyword range so goto-definition lands on (and references list)
-        // the full `::name` dispatch token.
-        name_range: node_to_lsp_range(*dispatch, source),
+        // the full `::name` token.
+        name_range: node_to_lsp_range(keyword, source),
         private: false,
     });
 }
@@ -1978,6 +2055,7 @@ fn discarded_keyword_starts(node: Node, source: &str, out: &mut HashSet<(u32, u3
             declared: HashSet::new(),
             lint_as: &lint_as,
             lint_as_forms: &HashMap::new(),
+            keyword_defs: HashSet::new(),
         };
         let mut scope = Scope::new();
         let mut occurrences = Vec::new();
@@ -2230,6 +2308,11 @@ struct OccurrenceCtx<'a> {
     lint_as: &'a HashMap<String, DefKind>,
     /// Macro fqn → core binding form, from the same config ([`lint_as_form`]).
     lint_as_forms: &'a HashMap<String, String>,
+    /// Where (line, character) each `KeywordDef` symbol's token starts. A
+    /// keyword-defining form's keyword is that symbol alone, never also an
+    /// occurrence — which keeps the rule depth-correct: a registration nested
+    /// in a fn body has no symbol, so its keyword stays an ordinary usage.
+    keyword_defs: HashSet<(u32, u32)>,
 }
 
 static CORE_NAMES: OnceLock<HashSet<String>> = OnceLock::new();
@@ -2528,7 +2611,7 @@ fn walk_def_form(
         }
         if let Some(dispatch) = children.get(2) {
             // The `ig/init-key` dispatch keyword is the component's *definition*
-            // (recorded as an IntegrantKey symbol in the symbol pass); skip it
+            // (recorded as a KeywordDef symbol in the symbol pass); skip it
             // here so references doesn't list the declaration twice. Every other
             // dispatch keyword falls through to the general keyword arm.
             let is_init_key_def = dispatch.kind() == "kwd_lit"
@@ -3369,10 +3452,17 @@ fn walk_quoted_data(node: Node, ctx: &OccurrenceCtx, out: &mut Vec<Occurrence>) 
 /// the whole keyword token so navigation resolves from a click anywhere on
 /// `:ns/name` / `::name`; a keyword rename edits the name the token ends with.
 fn record_keyword_occurrence(node: Node, ctx: &OccurrenceCtx, out: &mut Vec<Occurrence>) {
+    let range = node_to_lsp_range(node, ctx.source);
+    if ctx
+        .keyword_defs
+        .contains(&(range.start.line, range.start.character))
+    {
+        return;
+    }
     if let Some(fqn) = keyword_occurrence_fqn(node, ctx.ns_meta, ctx.source) {
         out.push(Occurrence {
             fqn,
-            name_range: node_to_lsp_range(node, ctx.source),
+            name_range: range,
         });
     }
 }

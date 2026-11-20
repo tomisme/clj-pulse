@@ -81,8 +81,13 @@ on the name, so renaming `state` leaves the `@` in place.
   in a destructuring directive (`{:keys [a & ::db]}`) and the keyword keys of
   an `:or` map (`:or {::db nil}`) are sites like any other.
 - **Keyword navigation** - go to definition and find references on namespaced
-  keywords, including Integrant component keys: jump from `:my.app/db` in a
-  `config.edn` system map (or an `#ig/ref`) to its `(defmethod ig/init-key ::db ...)`.
+  keywords. Integrant component keys jump from `:my.app/db` in a `config.edn`
+  system map (or an `#ig/ref`) to its `(defmethod ig/init-key ::db ...)`, and
+  re-frame registrations jump from a dispatch or subscribe site to the
+  `reg-event-fx`/`reg-sub` that defines the keyword — through an alias, a
+  `:refer`, or a bare `:ns/keyword` with no alias in scope. A project's own
+  registration macros are listed in `:keyword-defining-forms`
+  ([settings](SETTINGS.md)).
   A keyword in quoted data is a site like any other: a quote stops evaluation,
   not the reader.
 - **Java interop (built-in/JDK)** - go to definition, Javadoc hover, completion,
