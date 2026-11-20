@@ -1,6 +1,6 @@
 [tools]
 rust = { version = "1.96.0", components = "rustfmt,clippy" }
-babashka = "1.12.215"
+babashka = "1.13.228"
 
 # Verification-only tools (bb e2e-nvim / e2e-calva / e2e-pulse / e2e-real /
 # e2e-real-kondo); `bb check` needs only rust + babashka, and CI installs just
