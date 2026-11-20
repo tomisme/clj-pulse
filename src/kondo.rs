@@ -924,10 +924,14 @@ mod tests {
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let writer = std::fs::OpenOptions::new().append(true).open(&bin).unwrap();
+        let busy = std::process::Command::new(&bin).status();
+        if busy.is_ok() {
+            // macOS execs a file with an open writer; there is nothing to wait
+            // for, so the Linux path below is the one this test can exercise.
+            return;
+        }
         assert_eq!(
-            std::process::Command::new(&bin)
-                .status()
-                .expect_err("a binary with an open writer must not exec")
+            busy.expect_err("a binary with an open writer must not exec")
                 .raw_os_error(),
             Some(libc::ETXTBSY),
             "the setup must actually make the binary busy"

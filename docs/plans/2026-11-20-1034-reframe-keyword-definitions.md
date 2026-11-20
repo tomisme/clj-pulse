@@ -86,6 +86,10 @@ Only a top-level form defines, like every other `DefKind`.
 
 ## Verification
 
-- `bb check` green (fmt, clippy `-D warnings`, all tests).
-- `bb e2e` green, including the new re-frame test.
-- `bb compare` on clj-kondo: no new divergence — the keyword's definition site is a symbol, so references and rename answers keep the same site sets.
+- `bb check`: formatting and clippy `-D warnings` clean; lib 532 passed, every
+  other suite green.
+- `bb e2e`: 220 passed, including the new re-frame test.
+- `bb compare`: not run — it needs the pinned clj-kondo and penpot corpora under
+  `.tmp/bench/`. The keyword's definition site is a symbol, so references and
+  rename answers keep the same site sets, but that is reasoning, not a
+  measurement.
